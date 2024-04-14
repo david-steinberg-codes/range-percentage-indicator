@@ -1,0 +1,91 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © dsteinberg
+
+//@version=5
+indicator("Range Percentage", shorttitle = "RP", overlay = false, timeframe = "", timeframe_gaps = false)
+
+
+// Constants
+string OPT_SERIES = "<-Series"
+string OPT_VALUE = "Value->"
+
+string TT_TARGET = "Select between a series and a constant value to determine the upper bound of the range. Only the option you select will be used in calculation."
+string TT_BASE   = "Select between a series and a constant value to determine the lower bound of the range. Only the option you select will be used in calculation."
+string TT_BACKGROUND_COLOR = "Modify the opacity to reduce the visual intensity of background coloring, it will continue to work as expected."
+string TT_THRESHOLD = "Thresholds can be used to visually distinguish values within a certain percentage of a bound. You can also add a single alert on the indicator to be notified of any threshold crossings."
+string TT_ALERT_PRECISION = 'Controls precision in alert messages when using the {{plot("Percentage")}} placeholder. This does not affect how alerts are triggered.'
+
+
+// Inputs
+string SOURCES_GROUP = "Sources"
+upperBoundSeries    = input.source(high,            "Upper Bound",  group = SOURCES_GROUP, inline = "00", display = display.none, tooltip = TT_TARGET)
+upperBoundType      = input.string(OPT_SERIES,      "",             group = SOURCES_GROUP, inline = "00", display = display.none, options = [OPT_SERIES, OPT_VALUE])
+upperBoundValue     = input.float(0,                "",             group = SOURCES_GROUP, inline = "00", display = display.none)
+sample              = input.source(close,           "Sample      ", group = SOURCES_GROUP, inline = "01", display = display.all)
+lowerBoundSeries    = input.source(low,             "Lower Bound",  group = SOURCES_GROUP, inline = "02", display = display.none, tooltip = TT_BASE)
+lowerBoundType      = input.string(OPT_SERIES,      "",             group = SOURCES_GROUP, inline = "02", display = display.none, options = [OPT_SERIES, OPT_VALUE])
+lowerBoundValue     = input.float(0,                "",             group = SOURCES_GROUP, inline = "02", display = display.none)
+
+string THRESHOLDS_GROUP = "Thresholds"
+upperThreshold          = input.float(95,               "Upper Threshold",      group = THRESHOLDS_GROUP, inline = "00", display = display.none, minval = 0, maxval = 100, tooltip = TT_THRESHOLD)
+upperThresholdColor     = input.color(color.green,    "",                     group = THRESHOLDS_GROUP, inline = "00", display = display.none)
+upperThresholdAlerts    = input.bool(true,              "",                     group = THRESHOLDS_GROUP, inline = "00", display = display.none)
+lowerThreshold          = input.float(5,                "Lower Threshold ",     group = THRESHOLDS_GROUP, inline = "01", display = display.none, minval = 0, maxval = 100, tooltip = TT_THRESHOLD)
+lowerThresholdColor     = input.color(color.red,      "",                     group = THRESHOLDS_GROUP, inline = "01", display = display.none)
+lowerThresholdAlerts    = input.bool(true,              "",                     group = THRESHOLDS_GROUP, inline = "01", display = display.none)
+alertPrecision          = input.int(2,                  "Alert Precision   ",   group = THRESHOLDS_GROUP, inline = "02", display = display.none, minval = 0, maxval = 16, tooltip = TT_ALERT_PRECISION)
+
+string VISUALS_GROUP = "Visuals"
+backgroundColor     = input.color(color.purple, "Background Color", group = VISUALS_GROUP, display = display.none, tooltip = TT_BACKGROUND_COLOR)
+percentageLineColor = input.color(color.blue,   "Percentage Line",  group = VISUALS_GROUP, display = display.none)
+
+
+// Calculations
+bool anyAlerts = upperThresholdAlerts or lowerThresholdAlerts
+bool allAlerts = upperThresholdAlerts and lowerThresholdAlerts
+
+upper = switch upperBoundType
+    OPT_SERIES   => upperBoundSeries
+    OPT_VALUE    => upperBoundValue
+
+lower = switch lowerBoundType
+    OPT_SERIES   => lowerBoundSeries
+    OPT_VALUE    => lowerBoundValue
+
+if lower > upper 
+    runtime.error("Lower bound cannot be greater than upper bound, please check your configuration")
+
+if allAlerts and lowerThreshold > upperThreshold
+    runtime.error("Lower threshold cannot be greater than upper threshold, please check your configuration")
+
+
+percentage = nz((sample-lower)/(upper-lower)*100, 100)
+roundedPercentage = math.round(percentage, alertPrecision)
+
+upperThresholdMet = upperThresholdAlerts and percentage >= upperThreshold
+lowerThresholdMet = lowerThresholdAlerts and percentage <= lowerThreshold
+eitherThresholdMet = upperThresholdMet or lowerThresholdMet
+
+color bg = switch
+    upperThresholdMet => upperThresholdColor
+    lowerThresholdMet => lowerThresholdColor 
+    => color.new(backgroundColor, 100-percentage*(100-color.t(backgroundColor))/100)
+
+
+// Visuals
+plot(percentage, "Range Percentage", color = percentageLineColor, linewidth = 2, format = format.percent)
+plot(roundedPercentage, "Percentage", display = display.none, editable = false) // Only used for alertcondition placeholder
+
+hline(upperThresholdAlerts ? upperThreshold : na, "Upper Threshold", color = upperThresholdColor, linestyle = hline.style_dotted, editable = false)
+hline(lowerThresholdAlerts ? lowerThreshold : na, "Lower Threshold", color = lowerThresholdColor, linestyle = hline.style_dotted, editable = false)
+hline(anyAlerts ? 0 : na, color=color.new(color.white, 80), linestyle = hline.style_solid, linewidth = 2, editable = false)
+hline(anyAlerts ? 100 : na, color=color.new(color.white, 80), linestyle = hline.style_solid, linewidth = 2, editable = false)
+
+bgcolor(bg)
+
+
+// Alerts
+// Utilizing alertcondition() instead of alert() allows custom timeframes, alert() produces side effects that restrict this feature
+alertcondition(upperThresholdMet, "Upper Range Threshold", "The upper threshold of the range has been exceeded")
+alertcondition(lowerThresholdMet, "Lower Range Threshold", "The lower threshold of the range has been exceeded")
+alertcondition(eitherThresholdMet, "Any Range Threshold", 'A range threshold has been exceeded with value: {{plot("Percentage")}}%')
